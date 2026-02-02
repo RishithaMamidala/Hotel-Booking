@@ -4,7 +4,10 @@ const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const passport = require('passport');
-require('dotenv').config({ path: '../.env' });
+// Load .env from parent directory in development, or from environment in production
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config({ path: '../.env' });
+}
 
 const connectDB = require('./config/db');
 require('./config/passport');
