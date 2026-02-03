@@ -51,20 +51,25 @@ function CheckoutForm({ booking, onSuccess }) {
 
       if (stripeError) {
         setError(stripeError.message);
+        setProcessing(false);
       } else if (paymentIntent.status === 'succeeded') {
         // Verify payment and confirm booking on backend
         try {
           await paymentsAPI.verify(booking._id, paymentIntent.id);
+          onSuccess();
         } catch (verifyError) {
-          console.log('Verification fallback - webhook may handle it:', verifyError);
+          console.error('Verification error:', verifyError);
+          // Still redirect - booking may be confirmed by webhook
+          onSuccess();
         }
-        onSuccess();
+      } else {
+        setError('Payment was not completed. Please try again.');
+        setProcessing(false);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Payment failed');
+      setProcessing(false);
     }
-
-    setProcessing(false);
   };
 
   const handleSimulatePayment = async () => {
