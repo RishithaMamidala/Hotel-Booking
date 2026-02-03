@@ -24,6 +24,9 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 
+// Trust proxy for Render (required for secure cookies behind proxy)
+app.set('trust proxy', 1);
+
 // Connect to MongoDB
 connectDB();
 
@@ -66,6 +69,7 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Required for cross-origin cookies
   },
 }));
 
