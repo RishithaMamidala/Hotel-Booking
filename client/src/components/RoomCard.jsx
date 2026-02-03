@@ -23,10 +23,10 @@ function RoomCard({ room, onSelect, selected, available }) {
       } ${!isAvailable ? 'opacity-60' : 'cursor-pointer hover:shadow-soft-lg'}`}
       onClick={() => isAvailable && onSelect(room)}
     >
-      <div className="flex flex-col lg:flex-row">
+      <div className="flex flex-col sm:flex-row">
         {/* Image */}
-        <div className="lg:w-2/5 relative">
-          <div className="aspect-video lg:aspect-[4/3] lg:h-full">
+        <div className="sm:w-1/3 lg:w-2/5 flex-shrink-0 relative overflow-hidden">
+          <div className="aspect-video sm:aspect-square lg:aspect-[4/3] h-full">
             <img
               src={room.images?.[0] || defaultImage}
               alt={room.name}
@@ -43,18 +43,18 @@ function RoomCard({ room, onSelect, selected, available }) {
           )}
 
           {/* Room Type Badge - Mobile */}
-          <div className="absolute bottom-3 left-3 lg:hidden">
+          <div className="absolute bottom-3 left-3 sm:hidden">
             <span className={`badge ${config.color}`}>{config.label}</span>
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-4 sm:p-5 lg:w-3/5 flex flex-col">
+        <div className="p-4 sm:p-5 sm:w-2/3 lg:w-3/5 flex flex-col min-w-0">
           {/* Header */}
           <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <h3 className="text-lg font-semibold text-secondary-900 mb-1">{room.name}</h3>
-              <span className={`badge ${config.color} hidden lg:inline-flex`}>{config.label}</span>
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-secondary-900 mb-1 truncate">{room.name}</h3>
+              <span className={`badge ${config.color} hidden sm:inline-flex`}>{config.label}</span>
             </div>
           </div>
 
