@@ -1,14 +1,8 @@
-const sgMail = require('@sendgrid/mail');
 const nodemailer = require('nodemailer');
 const { formatDate } = require('../utils/helpers');
 
-// Initialize SendGrid if API key is available
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('SendGrid API configured');
-}
-
-// Create SMTP transporter as fallback
+// Create transporter using SMTP configuration
+// Compatible with Twilio SendGrid SMTP, Amazon SES, or any SMTP provider
 let transporter = null;
 
 const initializeTransporter = () => {
@@ -20,6 +14,7 @@ const initializeTransporter = () => {
   const smtpPass = process.env.SMTP_PASS;
 
   if (!smtpHost || !smtpUser || !smtpPass) {
+    console.log('SMTP not fully configured. Email delivery disabled.');
     return null;
   }
 
@@ -37,42 +32,21 @@ const initializeTransporter = () => {
 };
 
 const sendEmail = async (to, subject, html) => {
-  const fromEmail = process.env.EMAIL_FROM || 'noreply@hotelbook.com';
-
-  // Try SendGrid API first (works on Render)
-  if (process.env.SENDGRID_API_KEY) {
-    try {
-      await sgMail.send({
-        to,
-        from: fromEmail,
-        subject,
-        html,
-      });
-      console.log('Email sent via SendGrid API to:', to);
-      return { success: true };
-    } catch (error) {
-      console.error('SendGrid API error:', error.response?.body || error.message);
-      // Fall through to try SMTP
-    }
-  }
-
-  // Try SMTP as fallback
   const transport = initializeTransporter();
 
   if (!transport) {
     console.log('Email service not configured. Email would be sent to:', to);
     console.log('Subject:', subject);
-    return { success: true, message: 'Email simulated (not configured)' };
+    return { success: true, message: 'Email simulated (SMTP not configured)' };
   }
 
   try {
     await transport.sendMail({
-      from: fromEmail,
+      from: process.env.EMAIL_FROM || 'noreply@hotelbook.com',
       to,
       subject,
       html,
     });
-    console.log('Email sent via SMTP to:', to);
     return { success: true };
   } catch (error) {
     console.error('Email send error:', error);
