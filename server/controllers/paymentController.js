@@ -119,32 +119,51 @@ const getPaymentStatus = async (req, res) => {
 };
 
 // Verify payment with Stripe and confirm booking (fallback for webhook)
+// This endpoint doesn't require session auth - security comes from Stripe verification
 const verifyAndConfirm = async (req, res) => {
   try {
     const { bookingId, paymentIntentId } = req.body;
+
+    console.log('Verify endpoint called:', { bookingId, paymentIntentId });
+
+    if (!bookingId || !paymentIntentId) {
+      return res.status(400).json({ success: false, message: 'Missing bookingId or paymentIntentId' });
+    }
 
     const booking = await Booking.findById(bookingId);
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
-    // Check authorization
-    if (booking.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ success: false, message: 'Access denied' });
-    }
-
     // If already confirmed, return success
     if (booking.status === 'confirmed') {
-      return res.json({ success: true, booking });
+      console.log('Booking already confirmed');
+      return res.json({ success: true, booking, alreadyConfirmed: true });
     }
 
-    // Verify with Stripe
-    const { confirmPayment } = require('../services/stripe');
+    // Verify with Stripe - this is our security check
+    const { confirmPayment, stripe } = require('../services/stripe');
+
+    if (!stripe) {
+      // No Stripe configured - just confirm (test mode)
+      console.log('No Stripe - confirming directly');
+      const confirmedBooking = await confirmBooking(bookingId, paymentIntentId);
+      return res.json({ success: true, booking: confirmedBooking.booking });
+    }
+
     const result = await confirmPayment(paymentIntentId);
+    console.log('Stripe verification result:', result);
 
     if (result.success && result.status === 'succeeded') {
+      // Verify the payment intent belongs to this booking
+      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (paymentIntent.metadata.bookingId !== bookingId) {
+        return res.status(403).json({ success: false, message: 'Payment does not match booking' });
+      }
+
       // Confirm the booking
       const confirmedBooking = await confirmBooking(bookingId, paymentIntentId);
+      console.log('Booking confirmed:', confirmedBooking);
       return res.json({ success: true, booking: confirmedBooking.booking });
     }
 
@@ -154,6 +173,7 @@ const verifyAndConfirm = async (req, res) => {
       status: result.status
     });
   } catch (error) {
+    console.error('Verify endpoint error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

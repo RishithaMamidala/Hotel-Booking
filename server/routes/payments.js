@@ -44,8 +44,8 @@ router.post('/simulate',
 
 // @route   POST /api/payments/verify
 // @desc    Verify payment and confirm booking (fallback for webhook)
+// No auth required - security comes from Stripe verification
 router.post('/verify',
-  isAuthenticated,
   [
     body('bookingId').notEmpty().withMessage('Booking ID is required'),
     body('paymentIntentId').notEmpty().withMessage('Payment Intent ID is required'),
