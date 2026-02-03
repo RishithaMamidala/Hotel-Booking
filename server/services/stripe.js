@@ -70,18 +70,33 @@ const createRefund = async (paymentIntentId, amount = null) => {
 };
 
 const constructWebhookEvent = (payload, signature) => {
-  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
+  console.log('constructWebhookEvent called');
+  console.log('Stripe configured:', !!stripe);
+  console.log('Webhook secret configured:', !!process.env.STRIPE_WEBHOOK_SECRET);
+  console.log('Signature present:', !!signature);
+  console.log('Payload type:', typeof payload);
+  console.log('Payload is Buffer:', Buffer.isBuffer(payload));
+
+  if (!stripe) {
+    console.log('Stripe not configured');
+    return null;
+  }
+
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.log('STRIPE_WEBHOOK_SECRET not set');
     return null;
   }
 
   try {
-    return stripe.webhooks.constructEvent(
+    const event = stripe.webhooks.constructEvent(
       payload,
       signature,
       process.env.STRIPE_WEBHOOK_SECRET
     );
+    console.log('Webhook event constructed successfully:', event.type);
+    return event;
   } catch (error) {
-    console.error('Webhook signature verification failed:', error);
+    console.error('Webhook signature verification failed:', error.message);
     return null;
   }
 };

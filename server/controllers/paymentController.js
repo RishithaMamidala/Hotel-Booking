@@ -47,26 +47,33 @@ const createIntent = async (req, res) => {
 
 // Stripe webhook handler
 const handleWebhook = async (req, res) => {
+  console.log('Webhook received');
+  console.log('Has signature:', !!req.headers['stripe-signature']);
+  console.log('Has webhook secret:', !!process.env.STRIPE_WEBHOOK_SECRET);
+  console.log('Body type:', typeof req.body);
+  console.log('Body is Buffer:', Buffer.isBuffer(req.body));
+
   const sig = req.headers['stripe-signature'];
 
   const event = constructWebhookEvent(req.body, sig);
 
   if (!event) {
-    // If no Stripe configured, simulate success
-    const { bookingId, paymentIntentId } = req.body;
-    if (bookingId) {
-      await confirmBooking(bookingId, paymentIntentId || 'simulated');
-    }
-    return res.json({ received: true });
+    console.log('Event construction failed or no Stripe configured');
+    // Return 200 to acknowledge receipt even if we can't process
+    return res.json({ received: true, processed: false });
   }
+
+  console.log('Event type:', event.type);
 
   try {
     switch (event.type) {
       case 'payment_intent.succeeded':
         const paymentIntent = event.data.object;
         const bookingId = paymentIntent.metadata.bookingId;
+        console.log('Payment succeeded for booking:', bookingId);
         if (bookingId) {
-          await confirmBooking(bookingId, paymentIntent.id);
+          const result = await confirmBooking(bookingId, paymentIntent.id);
+          console.log('Booking confirmation result:', result);
         }
         break;
 
@@ -78,9 +85,9 @@ const handleWebhook = async (req, res) => {
         console.log(`Unhandled event type ${event.type}`);
     }
 
-    res.json({ received: true });
+    res.json({ received: true, processed: true });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook processing error:', error);
     res.status(500).json({ error: error.message });
   }
 };
