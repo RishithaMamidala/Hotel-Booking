@@ -23,11 +23,8 @@ router.post('/create-intent',
 );
 
 // @route   POST /api/payments/webhook
-// @desc    Stripe webhook handler
-router.post('/webhook',
-  express.raw({ type: 'application/json' }),
-  handleWebhook
-);
+// @desc    Stripe webhook handler (raw body middleware applied in server.js)
+router.post('/webhook', handleWebhook);
 
 // @route   GET /api/payments/:bookingId/status
 // @desc    Get payment status
