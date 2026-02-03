@@ -229,8 +229,9 @@ const cancelBooking = async (req, res) => {
     }
     await booking.save();
 
-    // Send cancellation email
-    await sendCancellationConfirmation(booking, booking.user, booking.hotel, refundAmount);
+    // Send cancellation email (don't block on email failure)
+    sendCancellationConfirmation(booking, booking.user, booking.hotel, refundAmount)
+      .catch(err => console.error('Failed to send cancellation email:', err.message));
 
     res.json({
       success: true,
@@ -285,8 +286,9 @@ const confirmBooking = async (bookingId, paymentIntentId) => {
     booking.payment.paidAt = new Date();
     await booking.save();
 
-    // Send confirmation email
-    await sendBookingConfirmation(booking, booking.user, booking.hotel, booking.room);
+    // Send confirmation email (don't block on email failure)
+    sendBookingConfirmation(booking, booking.user, booking.hotel, booking.room)
+      .catch(err => console.error('Failed to send confirmation email:', err.message));
 
     return { success: true, booking };
   } catch (error) {
