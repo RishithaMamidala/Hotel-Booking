@@ -111,6 +111,46 @@ const getPaymentStatus = async (req, res) => {
   }
 };
 
+// Verify payment with Stripe and confirm booking (fallback for webhook)
+const verifyAndConfirm = async (req, res) => {
+  try {
+    const { bookingId, paymentIntentId } = req.body;
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Check authorization
+    if (booking.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // If already confirmed, return success
+    if (booking.status === 'confirmed') {
+      return res.json({ success: true, booking });
+    }
+
+    // Verify with Stripe
+    const { confirmPayment } = require('../services/stripe');
+    const result = await confirmPayment(paymentIntentId);
+
+    if (result.success && result.status === 'succeeded') {
+      // Confirm the booking
+      const confirmedBooking = await confirmBooking(bookingId, paymentIntentId);
+      return res.json({ success: true, booking: confirmedBooking.booking });
+    }
+
+    res.status(400).json({
+      success: false,
+      message: 'Payment not verified',
+      status: result.status
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Simulate payment confirmation (for testing without Stripe)
 const simulatePayment = async (req, res) => {
   try {
@@ -133,4 +173,5 @@ module.exports = {
   handleWebhook,
   getPaymentStatus,
   simulatePayment,
+  verifyAndConfirm,
 };

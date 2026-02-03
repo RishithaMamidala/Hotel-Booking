@@ -5,6 +5,7 @@ const {
   handleWebhook,
   getPaymentStatus,
   simulatePayment,
+  verifyAndConfirm,
 } = require('../controllers/paymentController');
 const { isAuthenticated } = require('../middleware/auth');
 const validate = require('../middleware/validate');
@@ -39,6 +40,18 @@ router.post('/simulate',
   ],
   validate,
   simulatePayment
+);
+
+// @route   POST /api/payments/verify
+// @desc    Verify payment and confirm booking (fallback for webhook)
+router.post('/verify',
+  isAuthenticated,
+  [
+    body('bookingId').notEmpty().withMessage('Booking ID is required'),
+    body('paymentIntentId').notEmpty().withMessage('Payment Intent ID is required'),
+  ],
+  validate,
+  verifyAndConfirm
 );
 
 module.exports = router;

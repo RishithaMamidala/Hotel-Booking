@@ -62,6 +62,7 @@ export const paymentsAPI = {
   createIntent: (bookingId) => api.post('/payments/create-intent', { bookingId }),
   getStatus: (bookingId) => api.get(`/payments/${bookingId}/status`),
   simulate: (bookingId) => api.post('/payments/simulate', { bookingId }),
+  verify: (bookingId, paymentIntentId) => api.post('/payments/verify', { bookingId, paymentIntentId }),
 };
 
 // Users API

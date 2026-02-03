@@ -52,6 +52,12 @@ function CheckoutForm({ booking, onSuccess }) {
       if (stripeError) {
         setError(stripeError.message);
       } else if (paymentIntent.status === 'succeeded') {
+        // Verify payment and confirm booking on backend
+        try {
+          await paymentsAPI.verify(booking._id, paymentIntent.id);
+        } catch (verifyError) {
+          console.log('Verification fallback - webhook may handle it:', verifyError);
+        }
         onSuccess();
       }
     } catch (err) {
