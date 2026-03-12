@@ -30,24 +30,66 @@ app.set('trust proxy', 1);
 // Connect to MongoDB
 connectDB();
 
-// Middleware
+// FIX 3: Manual in-memory rate limiter (express-rate-limit is not in package.json)
+// Uses a sliding window per IP address
+function createRateLimiter({ windowMs, max, message }) {
+  const hits = new Map(); // ip -> [timestamp, ...]
+
+  // Purge old entries every window to prevent unbounded memory growth
+  setInterval(() => {
+    const cutoff = Date.now() - windowMs;
+    for (const [ip, timestamps] of hits.entries()) {
+      const recent = timestamps.filter(t => t > cutoff);
+      if (recent.length === 0) {
+        hits.delete(ip);
+      } else {
+        hits.set(ip, recent);
+      }
+    }
+  }, windowMs).unref();
+
+  return function rateLimiter(req, res, next) {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const cutoff = now - windowMs;
+    const timestamps = (hits.get(ip) || []).filter(t => t > cutoff);
+    timestamps.push(now);
+    hits.set(ip, timestamps);
+
+    if (timestamps.length > max) {
+      return res.status(429).json({ success: false, message });
+    }
+    next();
+  };
+}
+
+const authLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+});
+
+const paymentLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: 'Too many payment requests from this IP, please try again after 15 minutes',
+});
+
+// FIX 10: Strict CORS — exact URL matching only, no wildcard subdomains
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   process.env.CLIENT_URL,
-].filter(Boolean);
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+].filter(Boolean).map(o => o.replace(/\/$/, '')); // normalise trailing slash
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed.replace(/\/$/, '')))) {
-      return callback(null, true);
-    }
-
-    // In production, also allow any vercel.app subdomain
-    if (origin.endsWith('.vercel.app')) {
+    const normalised = origin.replace(/\/$/, '');
+    if (allowedOrigins.includes(normalised)) {
       return callback(null, true);
     }
 
@@ -64,9 +106,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// FIX 4: Validate SESSION_SECRET — throw in production, warn in development
+if (!process.env.SESSION_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET environment variable is required in production');
+  } else {
+    console.warn('WARNING: SESSION_SECRET is not set. Using insecure default for development only.');
+  }
+}
+
 // Session configuration
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -81,14 +132,14 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// API Routes
-app.use('/api/auth', authRoutes);
+// API Routes (rate limiters applied to auth and payment endpoints)
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/hotels', hotelRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/reviews', reviewRoutes);
-app.use('/api/payments', paymentRoutes);
+app.use('/api/payments', paymentLimiter, paymentRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Health check endpoint

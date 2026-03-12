@@ -1,3 +1,5 @@
+const { TAX_RATE } = require('../config/constants');
+
 // Calculate number of nights between dates (minimum 1 night)
 const calculateNights = (checkIn, checkOut) => {
   const start = new Date(checkIn);
@@ -8,7 +10,7 @@ const calculateNights = (checkIn, checkOut) => {
 };
 
 // Calculate booking pricing
-const calculatePricing = (pricePerNight, nights, extras = [], taxRate = 0.1) => {
+const calculatePricing = (pricePerNight, nights, extras = [], taxRate = TAX_RATE) => {
   const roomTotal = pricePerNight * nights;
   const extrasTotal = extras.reduce((sum, extra) => sum + (extra.price * extra.quantity), 0);
   const subtotal = roomTotal + extrasTotal;

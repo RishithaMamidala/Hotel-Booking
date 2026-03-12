@@ -87,8 +87,9 @@ const handleWebhook = async (req, res) => {
 
     res.json({ received: true, processed: true });
   } catch (error) {
+    // FIX 12: Always return 200 so Stripe does not retry — log the error instead
     console.error('Webhook processing error:', error);
-    res.status(500).json({ error: error.message });
+    res.json({ received: true, processed: false, error: error.message });
   }
 };
 

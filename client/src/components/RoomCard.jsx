@@ -1,6 +1,6 @@
 import { HiUsers, HiCheck, HiUserGroup } from 'react-icons/hi';
 
-function RoomCard({ room, onSelect, selected, available }) {
+function RoomCard({ room, onSelect, selected, available, capacityExceeded, guests }) {
   const defaultImage = 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800';
 
   const roomTypeConfig = {
@@ -13,6 +13,7 @@ function RoomCard({ room, onSelect, selected, available }) {
 
   const config = roomTypeConfig[room.type] || roomTypeConfig.single;
   const isAvailable = available > 0;
+  const isSelectable = isAvailable && !capacityExceeded;
 
   return (
     <div
@@ -20,8 +21,8 @@ function RoomCard({ room, onSelect, selected, available }) {
         selected
           ? 'border-2 border-primary-500 ring-4 ring-primary-100 shadow-soft-lg'
           : 'border border-secondary-200 hover:border-secondary-300'
-      } ${!isAvailable ? 'opacity-60' : 'cursor-pointer hover:shadow-soft-lg'}`}
-      onClick={() => isAvailable && onSelect(room)}
+      } ${!isSelectable ? 'opacity-60' : 'cursor-pointer hover:shadow-soft-lg'}`}
+      onClick={() => isSelectable && onSelect(room)}
     >
       <div className="flex flex-col sm:flex-row">
         {/* Image */}
@@ -100,7 +101,9 @@ function RoomCard({ room, onSelect, selected, available }) {
               <span className="text-secondary-500 text-sm">/night</span>
             </div>
             <div>
-              {!isAvailable ? (
+              {capacityExceeded ? (
+                <span className="badge badge-danger">Max {room.capacity.adults} guests</span>
+              ) : !isAvailable ? (
                 <span className="badge badge-danger">Not Available</span>
               ) : (
                 <span className="badge badge-success">

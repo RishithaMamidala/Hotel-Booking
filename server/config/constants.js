@@ -1,0 +1,5 @@
+module.exports = {
+  TAX_RATE: 0.1,
+  CANCELLATION_NOTICE_HOURS: 24,
+  DEFAULT_PAGE_LIMIT: 10,
+};

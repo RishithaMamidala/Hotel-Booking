@@ -1,5 +1,8 @@
 import { createContext, useContext, useReducer } from 'react';
 
+// Keep in sync with server/config/constants.js
+const TAX_RATE = 0.1;
+
 const BookingContext = createContext(null);
 
 const initialState = {
@@ -68,7 +71,7 @@ export function BookingProvider({ children }) {
     const roomTotal = state.room.pricePerNight * nights;
     const extrasTotal = state.extras.reduce((sum, extra) => sum + (extra.price * extra.quantity), 0);
     const subtotal = roomTotal + extrasTotal;
-    const taxes = Math.round(subtotal * 0.1 * 100) / 100;
+    const taxes = Math.round(subtotal * TAX_RATE * 100) / 100;
     const grandTotal = Math.round((subtotal + taxes) * 100) / 100;
 
     return { roomTotal, extrasTotal, taxes, grandTotal, nights };

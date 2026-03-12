@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const bookingSchema = new mongoose.Schema(
   {
@@ -83,10 +84,31 @@ const bookingSchema = new mongoose.Schema(
 );
 
 // Generate unique booking ID before saving
-bookingSchema.pre('validate', async function (next) {
+bookingSchema.pre('validate', function (next) {
   if (!this.bookingId) {
-    const count = await mongoose.model('Booking').countDocuments();
-    this.bookingId = `BK-${String(count + 1).padStart(5, '0')}`;
+    this.bookingId = `BK-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  }
+  next();
+});
+
+const VALID_TRANSITIONS = {
+  pending: ['confirmed', 'cancelled'],
+  confirmed: ['checked-in', 'cancelled'],
+  'checked-in': ['checked-out', 'cancelled'],
+  'checked-out': [],
+  cancelled: [],
+};
+
+// Validate status transitions
+bookingSchema.pre('save', async function (next) {
+  if (this.isNew || !this.isModified('status')) return next();
+
+  const prev = this._previousStatus;
+  if (!prev) return next(); // _previousStatus must be set by caller before modifying status
+
+  const allowed = VALID_TRANSITIONS[prev] || [];
+  if (!allowed.includes(this.status)) {
+    return next(new Error(`Invalid status transition from '${prev}' to '${this.status}'`));
   }
   next();
 });

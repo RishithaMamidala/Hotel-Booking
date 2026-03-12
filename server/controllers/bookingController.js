@@ -1,7 +1,9 @@
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Room = require('../models/Room');
 const Hotel = require('../models/Hotel');
 const User = require('../models/User');
+const Extra = require('../models/Extra');
 const { calculateNights, calculatePricing, calculateRefund, isCancellationAllowed } = require('../utils/helpers');
 const { sendBookingConfirmation, sendCancellationConfirmation } = require('../services/email');
 const { createRefund } = require('../services/stripe');
@@ -81,53 +83,93 @@ const createBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Hotel not found' });
     }
 
-    // Check availability
-    const checkInDate = new Date(checkIn);
-    const checkOutDate = new Date(checkOut);
-
-    const overlappingBookings = await Booking.countDocuments({
-      room: roomId,
-      status: { $in: ['confirmed', 'checked-in'] },
-      $or: [
-        { checkIn: { $lt: checkOutDate, $gte: checkInDate } },
-        { checkOut: { $gt: checkInDate, $lte: checkOutDate } },
-        { checkIn: { $lte: checkInDate }, checkOut: { $gte: checkOutDate } },
-      ],
-    });
-
-    if (overlappingBookings >= room.quantity) {
+    // FIX 11: Validate guest capacity against room limits
+    if (guests && guests.adults > room.capacity.adults) {
       return res.status(400).json({
         success: false,
-        message: 'Room not available for selected dates',
+        message: `Room capacity exceeded. Max ${room.capacity.adults} adults.`,
       });
     }
 
-    // Calculate pricing
+    // Validate extras against DB and use DB prices (before transaction — read-only)
+    let resolvedExtras = [];
+    if (extras && extras.length > 0) {
+      const hotelExtras = await Extra.find({ hotel: hotelId, isActive: true });
+      const extrasMap = new Map(hotelExtras.map(e => [e._id.toString(), e]));
+
+      for (const item of extras) {
+        const extraId = item.extraId?.toString();
+        if (!extraId || !extrasMap.has(extraId)) {
+          return res.status(400).json({
+            success: false,
+            message: `Extra with ID ${extraId} not found for this hotel`,
+          });
+        }
+        const dbExtra = extrasMap.get(extraId);
+        resolvedExtras.push({
+          name: dbExtra.name,
+          price: dbExtra.price, // use DB price, never client-supplied
+          quantity: item.quantity || 1,
+        });
+      }
+    }
+
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
     const nights = calculateNights(checkIn, checkOut);
-    const pricing = calculatePricing(room.pricePerNight, nights, extras || []);
+    const pricing = calculatePricing(room.pricePerNight, nights, resolvedExtras);
 
-    // Create booking
-    const booking = await Booking.create({
-      user: req.user._id,
-      hotel: hotelId,
-      room: roomId,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
-      guests,
-      extras: extras || [],
-      pricing,
-      specialRequests,
-      status: 'pending',
-    });
+    // Atomically check availability and create booking in a single transaction.
+    // withTransaction retries automatically on transient write conflicts.
+    let booking;
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const overlappingBookings = await Booking.countDocuments({
+          room: roomId,
+          status: { $in: ['confirmed', 'checked-in'] },
+          $or: [
+            { checkIn: { $lt: checkOutDate, $gte: checkInDate } },
+            { checkOut: { $gt: checkInDate, $lte: checkOutDate } },
+            { checkIn: { $lte: checkInDate }, checkOut: { $gte: checkOutDate } },
+          ],
+        }).session(session);
 
-    // Add booking to user's bookings
+        if (overlappingBookings >= room.quantity) {
+          const err = new Error('Room not available for selected dates');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        // create() with a session requires an array as the first argument
+        const [created] = await Booking.create([{
+          user: req.user._id,
+          hotel: hotelId,
+          room: roomId,
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
+          guests,
+          extras: resolvedExtras,
+          pricing,
+          specialRequests,
+          status: 'pending',
+        }], { session });
+
+        booking = created;
+      });
+    } finally {
+      session.endSession();
+    }
+
+    // Link booking to user outside the transaction — non-critical, eventual consistency is fine
     await User.findByIdAndUpdate(req.user._id, {
       $push: { bookings: booking._id },
     });
 
     res.status(201).json({ success: true, booking });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, message: error.message });
   }
 };
 
@@ -217,7 +259,8 @@ const cancelBooking = async (req, res) => {
       await createRefund(booking.payment.stripePaymentId, refundAmount);
     }
 
-    // Update booking
+    // Update booking (set _previousStatus for state machine validation)
+    booking._previousStatus = booking.status;
     booking.status = 'cancelled';
     booking.cancellation = {
       cancelledAt: new Date(),
@@ -259,6 +302,7 @@ const processCheckout = async (req, res) => {
       });
     }
 
+    booking._previousStatus = booking.status;
     booking.status = 'checked-out';
     await booking.save();
 
@@ -270,30 +314,80 @@ const processCheckout = async (req, res) => {
 
 // Confirm booking (after payment)
 const confirmBooking = async (bookingId, paymentIntentId) => {
+  // outcome is set inside the transaction callback and read outside
+  let outcome = null;
+
+  const session = await mongoose.startSession();
   try {
-    const booking = await Booking.findById(bookingId)
-      .populate('user')
-      .populate('hotel')
-      .populate('room');
+    await session.withTransaction(async () => {
+      const booking = await Booking.findById(bookingId)
+        .populate('user')
+        .populate('hotel')
+        .populate('room')
+        .session(session);
 
-    if (!booking) {
-      return { success: false, message: 'Booking not found' };
-    }
+      if (!booking) {
+        outcome = { success: false, message: 'Booking not found' };
+        return; // nothing written — transaction commits as a no-op
+      }
 
-    booking.status = 'confirmed';
-    booking.payment.status = 'paid';
-    booking.payment.stripePaymentId = paymentIntentId;
-    booking.payment.paidAt = new Date();
-    await booking.save();
+      // Already confirmed (e.g. webhook + verify both fired): idempotent success
+      if (booking.status === 'confirmed') {
+        outcome = { success: true, booking };
+        return;
+      }
 
-    // Send confirmation email (don't block on email failure)
-    sendBookingConfirmation(booking, booking.user, booking.hotel, booking.room)
-      .catch(err => console.error('Failed to send confirmation email:', err.message));
+      // Atomically re-check availability before confirming.
+      // Both the count and the save run inside the same transaction, so no
+      // concurrent confirmBooking call can slip through between the two.
+      const overlappingConfirmed = await Booking.countDocuments({
+        room: booking.room._id,
+        status: { $in: ['confirmed', 'checked-in'] },
+        _id: { $ne: booking._id },
+        $or: [
+          { checkIn: { $lt: booking.checkOut, $gte: booking.checkIn } },
+          { checkOut: { $gt: booking.checkIn, $lte: booking.checkOut } },
+          { checkIn: { $lte: booking.checkIn }, checkOut: { $gte: booking.checkOut } },
+        ],
+      }).session(session);
 
-    return { success: true, booking };
+      if (overlappingConfirmed >= booking.room.quantity) {
+        // Room was taken while payment was in flight — cancel and commit
+        booking._previousStatus = booking.status;
+        booking.status = 'cancelled';
+        booking.cancellation = {
+          cancelledAt: new Date(),
+          reason: 'Room became unavailable while payment was processing',
+          refundAmount: 0,
+        };
+        await booking.save({ session });
+        outcome = { success: false, message: 'Room is no longer available. Your payment will be refunded.' };
+        return; // commit the cancellation
+      }
+
+      booking._previousStatus = booking.status;
+      booking.status = 'confirmed';
+      booking.payment.status = 'paid';
+      booking.payment.stripePaymentId = paymentIntentId;
+      booking.payment.paidAt = new Date();
+      await booking.save({ session });
+
+      outcome = { success: true, booking };
+    });
   } catch (error) {
     return { success: false, message: error.message };
+  } finally {
+    session.endSession();
   }
+
+  // Send email outside the transaction — never blocks the commit
+  if (outcome?.success && outcome.booking) {
+    const { booking } = outcome;
+    sendBookingConfirmation(booking, booking.user, booking.hotel, booking.room)
+      .catch(err => console.error('Failed to send confirmation email:', err.message));
+  }
+
+  return outcome;
 };
 
 module.exports = {

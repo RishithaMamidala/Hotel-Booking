@@ -85,11 +85,29 @@ const updateUser = async (req, res) => {
 // Delete user (admin only)
 const deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const user = await User.findById(req.params.id);
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
+    // FIX 9: Cancel all active bookings before deleting user
+    await Booking.updateMany(
+      {
+        user: req.params.id,
+        status: { $in: ['pending', 'confirmed', 'checked-in'] },
+      },
+      {
+        $set: {
+          status: 'cancelled',
+          'cancellation.cancelledAt': new Date(),
+          'cancellation.reason': 'User account deleted',
+          'cancellation.refundAmount': 0,
+        },
+      }
+    );
+
+    await User.findByIdAndDelete(req.params.id);
 
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {

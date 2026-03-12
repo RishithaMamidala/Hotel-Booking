@@ -23,6 +23,21 @@ const getAllHotels = async (req, res) => {
 
     const query = { isActive: true };
 
+    // FIX 15: Validate search input
+    if (search && (typeof search !== 'string' || search.length > 100)) {
+      return res.status(400).json({ success: false, message: 'Invalid search query' });
+    }
+
+    // FIX 13: Validate and sanitize minPrice / maxPrice
+    const minPriceParsed = minPrice !== undefined ? parseFloat(minPrice) : undefined;
+    if (minPriceParsed !== undefined && (isNaN(minPriceParsed) || minPriceParsed < 0)) {
+      return res.status(400).json({ success: false, message: 'Invalid minPrice' });
+    }
+    const maxPriceParsed = maxPrice !== undefined ? parseFloat(maxPrice) : undefined;
+    if (maxPriceParsed !== undefined && (isNaN(maxPriceParsed) || maxPriceParsed < 0)) {
+      return res.status(400).json({ success: false, message: 'Invalid maxPrice' });
+    }
+
     // Location filters
     if (city) query['address.city'] = new RegExp(city, 'i');
     if (country) query['address.country'] = new RegExp(country, 'i');
@@ -49,18 +64,32 @@ const getAllHotels = async (req, res) => {
       .sort({ 'rating.average': -1 });
 
     // Price filter requires checking rooms
-    if (minPrice || maxPrice) {
+    if (minPriceParsed !== undefined || maxPriceParsed !== undefined) {
       const hotelIds = hotels.map(h => h._id);
       const priceQuery = { hotel: { $in: hotelIds }, isActive: true };
 
-      if (minPrice) priceQuery.pricePerNight = { $gte: parseFloat(minPrice) };
-      if (maxPrice) {
+      if (minPriceParsed !== undefined) priceQuery.pricePerNight = { $gte: minPriceParsed };
+      if (maxPriceParsed !== undefined) {
         priceQuery.pricePerNight = priceQuery.pricePerNight || {};
-        priceQuery.pricePerNight.$lte = parseFloat(maxPrice);
+        priceQuery.pricePerNight.$lte = maxPriceParsed;
       }
 
       const roomsWithPrice = await Room.find(priceQuery).distinct('hotel');
       hotels = hotels.filter(h => roomsWithPrice.some(id => id.equals(h._id)));
+    }
+
+    // Filter by guest capacity even when no dates are provided
+    if (guests && !checkIn) {
+      const guestCount = parseInt(guests);
+      if (!isNaN(guestCount) && guestCount > 0) {
+        const hotelIds = hotels.map(h => h._id);
+        const capableHotelIds = await Room.find({
+          hotel: { $in: hotelIds },
+          isActive: true,
+          'capacity.adults': { $gte: guestCount },
+        }).distinct('hotel');
+        hotels = hotels.filter(h => capableHotelIds.some(id => id.equals(h._id)));
+      }
     }
 
     // Filter by room availability if dates are provided
@@ -104,10 +133,10 @@ const getAllHotels = async (req, res) => {
 
           const available = room.quantity - bookedCount;
 
-          // Check capacity if guests specified
+          // Check adult capacity if guests specified
           let meetsCapacity = true;
           if (guestCount) {
-            meetsCapacity = room.capacity.adults + room.capacity.children >= guestCount;
+            meetsCapacity = room.capacity.adults >= guestCount;
           }
 
           return available > 0 && meetsCapacity;

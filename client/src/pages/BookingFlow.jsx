@@ -12,7 +12,7 @@ const stripePromise = import.meta.env.VITE_STRIPE_PUBLIC_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
   : null;
 
-function CheckoutForm({ booking, onSuccess }) {
+function StripeCheckoutForm({ booking, onSuccess }) {
   const stripe = useStripe();
   const elements = useElements();
   const [processing, setProcessing] = useState(false);
@@ -23,45 +23,24 @@ function CheckoutForm({ booking, onSuccess }) {
     setProcessing(true);
     setError(null);
 
-    if (!stripe || !elements) {
-      // Stripe not loaded, use simulation
-      try {
-        const response = await paymentsAPI.simulate(booking._id);
-        if (response.data.success) {
-          onSuccess(response.data.booking);
-        }
-      } catch (err) {
-        setError(err.response?.data?.message || 'Payment failed');
-      }
-      setProcessing(false);
-      return;
-    }
-
     try {
       const { data } = await paymentsAPI.createIntent(booking._id);
 
       const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(
         data.clientSecret,
-        {
-          payment_method: {
-            card: elements.getElement(CardElement),
-          },
-        }
+        { payment_method: { card: elements.getElement(CardElement) } }
       );
 
       if (stripeError) {
         setError(stripeError.message);
         setProcessing(false);
       } else if (paymentIntent.status === 'succeeded') {
-        // Verify payment and confirm booking on backend
         try {
           await paymentsAPI.verify(booking._id, paymentIntent.id);
-          onSuccess();
         } catch (verifyError) {
           console.error('Verification error:', verifyError);
-          // Still redirect - booking may be confirmed by webhook
-          onSuccess();
         }
+        onSuccess();
       } else {
         setError('Payment was not completed. Please try again.');
         setProcessing(false);
@@ -72,65 +51,78 @@ function CheckoutForm({ booking, onSuccess }) {
     }
   };
 
-  const handleSimulatePayment = async () => {
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="border rounded-lg p-4">
+        <CardElement
+          options={{
+            style: {
+              base: { fontSize: '16px', color: '#424770', '::placeholder': { color: '#aab7c4' } },
+              invalid: { color: '#9e2146' },
+            },
+          }}
+        />
+      </div>
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+        <p className="font-medium mb-1">Test Mode — use these card details:</p>
+        <p>Card number: <span className="font-mono">4242 4242 4242 4242</span></p>
+        <p>Expiry: any future date &nbsp; CVC: any 3 digits</p>
+      </div>
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+      <button
+        type="submit"
+        disabled={!stripe || processing}
+        className="w-full btn btn-primary disabled:opacity-50"
+      >
+        {processing ? 'Processing...' : `Pay $${booking.pricing.grandTotal.toFixed(2)}`}
+      </button>
+    </form>
+  );
+}
+
+function SimulateCheckoutForm({ booking, onSuccess }) {
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setProcessing(true);
     setError(null);
-
     try {
       const response = await paymentsAPI.simulate(booking._id);
-      if (response.data.success) {
-        onSuccess(response.data.booking);
-      }
+      if (response.data.success) onSuccess(response.data.booking);
     } catch (err) {
       setError(err.response?.data?.message || 'Payment failed');
     }
-
     setProcessing(false);
   };
 
   return (
-    <div className="space-y-4">
-      {stripePromise ? (
-        <form onSubmit={handleSubmit}>
-          <div className="border rounded-lg p-4 mb-4">
-            <CardElement
-              options={{
-                style: {
-                  base: {
-                    fontSize: '16px',
-                    color: '#424770',
-                    '::placeholder': { color: '#aab7c4' },
-                  },
-                  invalid: { color: '#9e2146' },
-                },
-              }}
-            />
-          </div>
-          {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-          <button
-            type="submit"
-            disabled={!stripe || processing}
-            className="w-full btn btn-primary disabled:opacity-50"
-          >
-            {processing ? 'Processing...' : `Pay $${booking.pricing.grandTotal.toFixed(2)}`}
-          </button>
-        </form>
-      ) : (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-3">
         <div>
-          <p className="text-sm text-gray-500 mb-4">
-            Stripe is not configured. Using test mode.
-          </p>
-          {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-          <button
-            onClick={handleSimulatePayment}
-            disabled={processing}
-            className="w-full btn btn-primary disabled:opacity-50"
-          >
-            {processing ? 'Processing...' : `Pay $${booking.pricing.grandTotal.toFixed(2)} (Test Mode)`}
-          </button>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Card Number</label>
+          <input type="text" defaultValue="4242 4242 4242 4242" className="input font-mono" readOnly />
         </div>
-      )}
-    </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Expiry</label>
+            <input type="text" defaultValue="12/28" className="input font-mono" readOnly />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">CVC</label>
+            <input type="text" defaultValue="123" className="input font-mono" readOnly />
+          </div>
+        </div>
+      </div>
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+        Test mode — no real charge will occur.
+      </div>
+      {error && <p className="text-red-600 text-sm">{error}</p>}
+      <button type="submit" disabled={processing} className="w-full btn btn-primary disabled:opacity-50">
+        {processing ? 'Processing...' : `Pay $${booking.pricing.grandTotal.toFixed(2)}`}
+      </button>
+    </form>
   );
 }
 
@@ -177,11 +169,12 @@ function BookingFlow() {
   };
 
   const handleExtraToggle = (extra) => {
-    const exists = extras.find((e) => e.name === extra.name);
+    const exists = extras.find((e) => e.extraId === extra._id);
     if (exists) {
-      setExtras(extras.filter((e) => e.name !== extra.name));
+      setExtras(extras.filter((e) => e.extraId !== extra._id));
     } else {
-      setExtras([...extras, { name: extra.name, price: extra.price, quantity: 1 }]);
+      // extraId is required by the backend; name/price kept for local display only
+      setExtras([...extras, { extraId: extra._id, name: extra.name, price: extra.price, quantity: 1 }]);
     }
   };
 
@@ -272,7 +265,7 @@ function BookingFlow() {
                 ) : (
                   <div className="space-y-4">
                     {availableExtras.map((extra) => {
-                      const isSelected = extras.some((e) => e.name === extra.name);
+                      const isSelected = extras.some((e) => e.extraId === extra._id);
                       return (
                         <div
                           key={extra._id}
@@ -440,9 +433,13 @@ function BookingFlow() {
                   <p className="font-mono font-semibold">{booking.bookingId}</p>
                 </div>
 
-                <Elements stripe={stripePromise}>
-                  <CheckoutForm booking={booking} onSuccess={handlePaymentSuccess} />
-                </Elements>
+                {stripePromise ? (
+                  <Elements stripe={stripePromise}>
+                    <StripeCheckoutForm booking={booking} onSuccess={handlePaymentSuccess} />
+                  </Elements>
+                ) : (
+                  <SimulateCheckoutForm booking={booking} onSuccess={handlePaymentSuccess} />
+                )}
               </div>
             )}
           </div>

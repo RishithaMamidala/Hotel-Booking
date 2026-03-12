@@ -48,20 +48,41 @@ const reviewSchema = new mongoose.Schema(
 reviewSchema.index({ user: 1, booking: 1 }, { unique: true });
 reviewSchema.index({ hotel: 1, createdAt: -1 });
 
-// Update hotel rating after review save
-reviewSchema.post('save', async function () {
+// Helper to recalculate and persist hotel rating
+async function recalculateHotelRating(ReviewModel, hotelId) {
   const Hotel = mongoose.model('Hotel');
-  const reviews = await this.constructor.find({ hotel: this.hotel });
+  const reviews = await ReviewModel.find({ hotel: hotelId });
 
   if (reviews.length > 0) {
     const average = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
-    await Hotel.findByIdAndUpdate(this.hotel, {
+    await Hotel.findByIdAndUpdate(hotelId, {
       rating: {
         average: Math.round(average * 10) / 10,
         count: reviews.length,
       },
     });
+  } else {
+    // No reviews left — reset rating to 0
+    await Hotel.findByIdAndUpdate(hotelId, {
+      rating: { average: 0, count: 0 },
+    });
   }
+}
+
+// Update hotel rating after review save
+reviewSchema.post('save', async function () {
+  await recalculateHotelRating(this.constructor, this.hotel);
+});
+
+// FIX 8: Update hotel rating after review deletion
+reviewSchema.post('findOneAndDelete', async function (doc) {
+  if (doc) {
+    await recalculateHotelRating(doc.constructor, doc.hotel);
+  }
+});
+
+reviewSchema.post('deleteOne', { document: true, query: false }, async function () {
+  await recalculateHotelRating(this.constructor, this.hotel);
 });
 
 module.exports = mongoose.model('Review', reviewSchema);

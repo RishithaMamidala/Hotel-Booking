@@ -90,6 +90,13 @@ function HotelDetails() {
     setSelectedRoom(room);
   };
 
+  // Deselect room if guest count changes and room can no longer accommodate
+  useEffect(() => {
+    if (selectedRoom && selectedRoom.capacity.adults < guests) {
+      setSelectedRoom(null);
+    }
+  }, [guests]);
+
   const handleBookNow = () => {
     if (!isAuthenticated) {
       login();
@@ -244,15 +251,20 @@ function HotelDetails() {
                         No rooms available for the selected dates
                       </p>
                     ) : (
-                      availability.map((item) => (
-                        <RoomCard
-                          key={item.room._id}
-                          room={item.room}
-                          available={item.available}
-                          selected={selectedRoom?._id === item.room._id}
-                          onSelect={() => handleRoomSelect(item.room)}
-                        />
-                      ))
+                      availability.map((item) => {
+                        const capacityExceeded = item.room.capacity.adults < guests;
+                        return (
+                          <RoomCard
+                            key={item.room._id}
+                            room={item.room}
+                            available={item.available}
+                            selected={selectedRoom?._id === item.room._id}
+                            onSelect={() => handleRoomSelect(item.room)}
+                            capacityExceeded={capacityExceeded}
+                            guests={guests}
+                          />
+                        );
+                      })
                     )}
                   </div>
                 ) : (

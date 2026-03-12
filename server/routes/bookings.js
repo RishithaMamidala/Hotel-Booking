@@ -30,6 +30,12 @@ router.post('/',
     body('roomId').notEmpty().withMessage('Room ID is required'),
     body('checkIn').isISO8601().withMessage('Valid check-in date is required'),
     body('checkOut').isISO8601().withMessage('Valid check-out date is required'),
+    body('checkOut').custom((value, { req }) => {
+      if (new Date(value) <= new Date(req.body.checkIn)) {
+        throw new Error('Check-out must be after check-in');
+      }
+      return true;
+    }),
     body('guests.adults').isInt({ min: 1 }).withMessage('At least 1 adult guest is required'),
   ],
   validate,
